@@ -1,0 +1,16 @@
+{
+  "name": "reddit-to-nostr",
+  "version": "0.0.1",
+  "description": "Wrap nostr in a reddit styled api",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "nostr-tools": "^1.12.0",
+    "websocket-polyfill": "^0.0.3"
+  }
+}
