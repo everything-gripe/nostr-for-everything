@@ -1,9 +1,10 @@
 {
   "name": "reddit-to-nostr",
   "version": "0.0.1",
-  "description": "Wrap nostr in a reddit styled api",
+  "description": "Wrap Nostr in a Reddit styled api",
   "main": "index.js",
   "scripts": {
+    "start:dev": "vercel dev",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],

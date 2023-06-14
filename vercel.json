@@ -1,6 +1,6 @@
 {
   "rewrites": [{
-    "source": "/:path*",
-    "destination": "/api/:path*"
+    "source": "/:path*.json:else*",
+    "destination": "/api/:path*:else*"
   }]
 }
