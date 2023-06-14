@@ -1,7 +1,7 @@
 ﻿import 'websocket-polyfill'
-import {SimplePool} from "nostr-tools";
+import {nip05, nip19, SimplePool} from "nostr-tools";
 
-async function getEvents(limit, filter = {}) {
+async function getEvents({limit, filter = {}}) {
     const pool = new SimplePool()
 
     const relays = [
@@ -41,15 +41,66 @@ async function getEvents(limit, filter = {}) {
 
     return await pool.list(relays, [
         {
-            ...filter,
             limit,
-            kinds: [1]
+            kinds: [1],
+            ...filter
         }
     ]);
 }
 
+export async function getPubkey(user) {
+    const displayNameRegex = /npub\w+/
+    const match = user.match(displayNameRegex)
+    if (match) {
+        user = nip19.decode(match[0]).data
+    } else if (nip05.NIP05_REGEX.test(user)) {
+        nip05.useFetchImplementation(require('node-fetch'))
+        user = (await nip05.queryProfile(user)).pubkey
+    }
+
+    return user
+}
+
+export async function getUser(pubkey) {
+    const user = JSON.parse(deduplicateEventsByLatestVersion(await getEvents({
+        limit: 1,
+        filter: {
+            kinds: [0],
+            authors: [pubkey]
+        }
+    }))[0].content)
+
+    return {
+        kind: "t2",
+        data: {
+            icon_img: user.picture,
+            name: displayName(user) || pubkey,
+            id: pubkey,
+            subreddit: {
+                public_description: user.about,
+                display_name: displayName(user) || pubkey,
+                display_name_prefixed: displayName(user) || pubkey,
+                subreddit_type: "user",
+                icon_img: user.picture,
+            }
+        }
+    }
+}
+
+async function getEventAuthors(events) {
+    const authors = [...new Set(events.map(event => event.pubkey))]
+    const authorEvents = deduplicateEventsByLatestVersion(await getEvents({
+        filter: {
+            kinds: [0],
+            authors
+        }
+    }))
+    return Object.fromEntries(authorEvents.map(event => [event.pubkey, JSON.parse(event.content)]));
+}
+
 export async function getPosts(limit, filter = {}) {
-    const events = await getEvents(limit, filter);
+    const events = await getEvents({limit, filter});
+    const authors = await getEventAuthors(events);
 
     return {
         kind: "Listing",
@@ -58,26 +109,43 @@ export async function getPosts(limit, filter = {}) {
             dist: limit,
             modhash: "",
             geo_filter: null,
-            children: events.map(event => convertEventToPost(event)),
+            children: events.map(event => convertEventToPost(event, authors)),
             before: null
         }
     }
 }
 
+function deduplicateEventsByLatestVersion(events) {
+    const deduplicated = {};
+
+    for (const event of events) {
+        const pubkey = event.pubkey
+        const createdAt = event.created_at
+
+        if (!(pubkey in deduplicated) || createdAt > deduplicated[pubkey].created_at) {
+            deduplicated[pubkey] = event
+        }
+    }
+
+    return Object.values(deduplicated)
+}
+
 export async function getComments(postId, limit, filter = {}) {
-    console.log(postId)
     const post = await getPosts(1,
         {
             ids: [postId]
         }
     )
 
-    const events = await getEvents(limit,
-        {
+    const events = await getEvents({
+        limit,
+        filter: {
             ...filter,
             '#e': [postId]
         }
-    );
+    });
+
+    const authors = await getEventAuthors(events);
 
     return [post, {
         kind: "Listing",
@@ -86,14 +154,14 @@ export async function getComments(postId, limit, filter = {}) {
             dist: limit,
             modhash: "",
             geo_filter: null,
-            children: nestEvents(events, postId),
+            children: nestEvents(events, postId, authors),
             before: null
         }
     }]
 }
 
 
-function nestEvents(flatEvents, rootId) {
+function nestEvents(flatEvents, rootId, authors) {
     const events = {};
 
     for (const event of flatEvents) {
@@ -124,14 +192,12 @@ function nestEvents(flatEvents, rootId) {
 
         const parentId = replyId ?? rootId
         events[parentId] ??= [];
-        events[parentId].push(convertEventToComment(rootId, event));
+        events[parentId].push(convertEventToComment(rootId, event, authors));
     }
 
     for (const eventId in events) {
         for (const event of events[eventId]) {
-            console.log('eventId', event.data.id)
             const replies = events[event.data.id]
-            console.log('replies', replies)
             if (replies) {
                 event.data.replies = {
                     kind: "Listing",
@@ -151,8 +217,11 @@ function nestEvents(flatEvents, rootId) {
     return events[rootId] ?? [];
 }
 
+export const displayName = user => user.display_name || user.displayName || user.name || user.username || user.nip05
+export const author = (user, pubkey) => user ? user.nip05 || `${displayName(user)} (${nip19.npubEncode(pubkey)})` || pubkey : pubkey;
 
-function convertEventToPost(event) {
+
+function convertEventToPost(event, authors) {
     const convertedData = {
         kind: "t3",
         data: {
@@ -267,7 +336,9 @@ function convertEventToPost(event) {
 
     // convertedData.data.title = "Title"
     convertedData.data.selftext = event.content;
-    convertedData.data.author = event.pubkey;
+    convertedData.data.author = author(authors[event.pubkey], event.pubkey)
+    convertedData.data.author_fullname = `t2_${event.pubkey}`
+    // convertedData.data.name = authors[event.pubkey].display_name
     // convertedData.data.name = `t3_${eventResponse.id}`;
     convertedData.data.id = event.id;
     convertedData.data.created_utc = event.created_at;
@@ -275,7 +346,7 @@ function convertEventToPost(event) {
     return convertedData;
 }
 
-function convertEventToComment(postId, event) {
+function convertEventToComment(postId, event, authors) {
     const convertedData = {
         kind: "t1",
         data: {
@@ -358,8 +429,9 @@ function convertEventToComment(postId, event) {
         }
     }
 
-    convertedData.data.author = event.pubkey;
+    convertedData.data.author = author(authors[event.pubkey], event.pubkey);
     convertedData.data.id = event.id;
+    convertedData.data.author_fullname = `t2_${event.pubkey}`
     convertedData.data.link_id = `t3_${postId}`
     convertedData.data.body = event.content;
     convertedData.data.body_html = event.content;
