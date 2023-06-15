@@ -3,6 +3,7 @@
 export default async function (request, response) {
     const pubkey = await getPubkey(request.query.username)
     const limit = Number(request.query.limit ?? 25)
+    const after = Number(request.query.after ?? 0)
 
     let getPostsFunc;
     switch (request.query.where.toLowerCase()) {
@@ -19,7 +20,8 @@ export default async function (request, response) {
 
     const posts = await getPostsFunc(limit,
         {
-            authors: [pubkey]
+            authors: [pubkey],
+            'until': after || undefined
         }
     )
 

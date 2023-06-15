@@ -53,7 +53,7 @@ async function getEvents({limit, filter = {}}) {
         events = events.filter(filterFunc)
     }
 
-    return events;
+    return events.sort((eventLeft, eventRight) => eventRight.created_at - eventLeft.created_at);
 }
 
 export async function getPubkey(user) {
@@ -114,8 +114,8 @@ export async function getPosts(limit, filter = {}) {
     return {
         kind: "Listing",
         data: {
-            after: null,
-            dist: limit,
+            after: events[events.length -1]?.created_at,
+            dist: events.length,
             modhash: "",
             geo_filter: null,
             children: events.map(event => convertEventToPost(event, authors)),
@@ -183,8 +183,8 @@ export async function getNestedComments(ids, limit, filter = {}) {
     return [post, {
         kind: "Listing",
         data: {
-            after: null,
-            dist: limit,
+            after: events[events.length -1]?.created_at,
+            dist: events.length,
             modhash: "",
             geo_filter: null,
             children: nestEvents(ids.postId, events, authors),
@@ -208,8 +208,8 @@ export async function getFlatComments(limit, filter = {}) {
     return {
         kind: "Listing",
         data: {
-            after: null,
-            dist: limit,
+            after: events[events.length -1]?.created_at,
+            dist: events.length,
             modhash: "",
             geo_filter: null,
             children: events.map(event => {
@@ -234,8 +234,8 @@ export async function getPostsAndComments(limit, filter = {}) {
     return {
         kind: "Listing",
         data: {
-            after: null,
-            dist: limit,
+            after: events[events.length -1]?.created_at,
+            dist: events.length,
             modhash: "",
             geo_filter: null,
             children: events.map(event => {
@@ -288,21 +288,22 @@ function nestEvents(rootId, flatEvents, authors) {
 
         const parentId = replyIds.replyId ?? replyIds.rootId
         events[parentId] ??= [];
-        events[parentId].push(convertEventToComment(replyIds.rootId, event, authors));
+        events[parentId].push({event, comment:  convertEventToComment(replyIds.rootId, event, authors)})
     }
 
     for (const eventId in events) {
+        events[eventId].sort((leftEvent, rightEvent) => rightEvent.event.created_at - leftEvent.event.created_at)
         for (const event of events[eventId]) {
-            const replies = events[event.data.id]
+            const replies = events[event.event.id]
             if (replies) {
-                event.data.replies = {
+                event.comment.data.replies = {
                     kind: "Listing",
                     data: {
                         after: null,
                         dist: null,
                         modhash: "",
                         geo_filter: null,
-                        children: replies,
+                        children: replies.map(event => event.comment),
                         before: null
                     }
                 }
@@ -310,7 +311,7 @@ function nestEvents(rootId, flatEvents, authors) {
         }
     }
 
-    return events[rootId] ?? [];
+    return events[rootId].map(event => event.comment) ?? [];
 }
 
 export const displayName = user => user.display_name || user.displayName || user.name || user.username || user.nip05
@@ -434,7 +435,7 @@ function convertEventToPost(event, authors) {
         }
     };
 
-    // convertedData.data.title = "Title"
+    // convertedData.data.title = "----------------------------------------------------"
     convertedData.data.selftext = event.content;
     convertedData.data.author = author(authors[event.pubkey], event.pubkey)
     convertedData.data.author_fullname = `t2_${event.pubkey}`
@@ -538,7 +539,7 @@ function convertEventToComment(postId, event, authors) {
     // convertedData.data.link_permalink = `https://www.reddit.com/r/anything/comments/${postId}/something_here/`
     convertedData.data.body = event.content;
     convertedData.data.body_html = event.content;
-    convertedData.data.created = event.created_at
+    convertedData.data.created = event.created_at;
     convertedData.data.created_utc = event.created_at;
 
     return convertedData;
