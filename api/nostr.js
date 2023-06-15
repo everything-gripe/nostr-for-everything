@@ -39,13 +39,21 @@ async function getEvents({limit, filter = {}}) {
         // "wss://nostr.orangepill.dev"
     ]
 
-    return await pool.list(relays, [
+    const {filterFunc, ...relayFilter} = filter
+
+    let events = await pool.list(relays, [
         {
             limit,
             kinds: [1],
-            ...filter
+            ...relayFilter
         }
-    ]);
+    ])
+
+    if (filterFunc) {
+        events = events.filter(filterFunc)
+    }
+
+    return events;
 }
 
 export async function getPubkey(user) {
@@ -99,6 +107,7 @@ async function getEventAuthors(events) {
 }
 
 export async function getPosts(limit, filter = {}) {
+    filter.filterFunc = isNotReply
     const events = await getEvents({limit, filter});
     const authors = await getEventAuthors(events);
 
@@ -130,20 +139,44 @@ function deduplicateEventsByLatestVersion(events) {
     return Object.values(deduplicated)
 }
 
-export async function getComments(postId, limit, filter = {}) {
+export async function getNestedComments(ids, limit, filter = {}) {
     const post = await getPosts(1,
         {
-            ids: [postId]
+            ids: [ids.postId]
         }
     )
+
+    if (ids.commentId) {
+        var comment = (await getEvents({
+            limit: 1,
+            filter: {
+                ids: [ids.commentId]
+            }
+        }))[0]
+    }
 
     const events = await getEvents({
         limit,
         filter: {
-            ...filter,
-            '#e': [postId]
-        }
+            filterFunc: isReply,
+            '#e': [ids.postId],
+            ids: comment ? [...new Set(comment.tags.filter(tag => tag[0] === "e").map(tag => tag[1]))] : undefined,
+            ...filter
+        },
     });
+
+    if (comment) {
+        const replyEvents = await getEvents({
+            limit,
+            filter: {
+                filterFunc: isReply,
+                '#e': [ids.commentId],
+                ...filter
+            },
+        });
+
+        events.push(comment, ...replyEvents)
+    }
 
     const authors = await getEventAuthors(events);
 
@@ -154,45 +187,108 @@ export async function getComments(postId, limit, filter = {}) {
             dist: limit,
             modhash: "",
             geo_filter: null,
-            children: nestEvents(events, postId, authors),
+            children: nestEvents(ids.postId, events, authors),
             before: null
         }
     }]
 }
 
 
-function nestEvents(flatEvents, rootId, authors) {
-    const events = {};
+export async function getFlatComments(limit, filter = {}) {
+    const events = await getEvents({
+        limit,
+        filter: {
+            filterFunc: isReply,
+            ...filter
+        }
+    });
 
-    for (const event of flatEvents) {
-        const tags = event.tags || [];
+    const authors = await getEventAuthors(events);
 
-        // let rootId = null;
-        let replyId = null;
+    return {
+        kind: "Listing",
+        data: {
+            after: null,
+            dist: limit,
+            modhash: "",
+            geo_filter: null,
+            children: events.map(event => {
+                const postId = getReplyIds(event).rootId
+                return convertEventToComment(postId, event, authors)
+            }),
+            before: null
+        }
+    }
+}
 
-        for (const tag of tags) {
-            if (tag[0] === "e") {
+export async function getPostsAndComments(limit, filter = {}) {
+    const events = await getEvents({
+        limit,
+        filter: {
+            ...filter
+        }
+    });
+
+    const authors = await getEventAuthors(events);
+
+    return {
+        kind: "Listing",
+        data: {
+            after: null,
+            dist: limit,
+            modhash: "",
+            geo_filter: null,
+            children: events.map(event => {
+                if (isReply(event)) {
+                    const postId = getReplyIds(event).rootId
+                    return convertEventToComment(postId, event, authors)
+                } else {
+                    return convertEventToPost(event, authors)
+                }
+            }),
+            before: null
+        }
+    }
+}
+
+function getReplyIds(event) {
+    const ids = {}
+    for (const tag of event.tags || []) {
+        if (tag[0] === "e") {
+            const eventId = tag[1];
+            if (tag.length === 2) {
+                if (!ids.rootId) {
+                    ids.rootId = eventId
+                }
+                ids.replyId = eventId
+            } else if (tag.length >= 4) {
                 const eventId = tag[1];
-                if (tag.length === 2) {
-                    replyId = eventId
-                } else if (tag.length >= 4) {
-                    const eventId = tag[1];
-                    const marker = tag[3];
+                const marker = tag[3];
 
-                    if (marker === "root") {
-                        // rootId = eventId;
-                    } else if (marker === "reply") {
-                        replyId = eventId;
-                    } else if (marker === "mention") {
+                //TODO: Consider if there is no marker
+                if (marker === "root") {
+                    ids.rootId = eventId
+                } else if (marker === "reply") {
+                    ids.replyId = eventId;
+                } else if (marker === "mention") {
 
-                    }
                 }
             }
         }
+    }
+    return ids;
+}
 
-        const parentId = replyId ?? rootId
+function nestEvents(rootId, flatEvents, authors) {
+    const events = {};
+
+    for (const event of flatEvents) {
+
+        let replyIds = getReplyIds(event)
+
+        const parentId = replyIds.replyId ?? replyIds.rootId
         events[parentId] ??= [];
-        events[parentId].push(convertEventToComment(rootId, event, authors));
+        events[parentId].push(convertEventToComment(replyIds.rootId, event, authors));
     }
 
     for (const eventId in events) {
@@ -219,7 +315,11 @@ function nestEvents(flatEvents, rootId, authors) {
 
 export const displayName = user => user.display_name || user.displayName || user.name || user.username || user.nip05
 export const author = (user, pubkey) => user ? user.nip05 || `${displayName(user)} (${nip19.npubEncode(pubkey)})` || pubkey : pubkey;
-
+export const isNotReply = event => !isReply(event)
+//TODO: Consider if there is no marker
+export const isReply = event => event.tags
+    .filter(tag => tag[0] === "e")
+    .some(tag => tag[3] !== "mention")
 
 function convertEventToPost(event, authors) {
     const convertedData = {
@@ -433,6 +533,9 @@ function convertEventToComment(postId, event, authors) {
     convertedData.data.id = event.id;
     convertedData.data.author_fullname = `t2_${event.pubkey}`
     convertedData.data.link_id = `t3_${postId}`
+    // convertedData.data.link_id = `t3_7efd3372c0cbbd5b5f45cdedc14d58f28b8873e7673c642aeb7796177757e52e`
+    // convertedData.data.permalink = `/r/anything/comments/${postId}/something_here/${event.id}`
+    // convertedData.data.link_permalink = `https://www.reddit.com/r/anything/comments/${postId}/something_here/`
     convertedData.data.body = event.content;
     convertedData.data.body_html = event.content;
     convertedData.data.created = event.created_at
