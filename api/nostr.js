@@ -96,6 +96,8 @@ export async function getUser(pubkey) {
 }
 
 async function getEventAuthors(events) {
+    if (!events?.length) return {}
+
     const authors = [...new Set(events.map(event => event.pubkey))]
     const authorEvents = deduplicateEventsByLatestVersion(await getEvents({
         filter: {
@@ -103,6 +105,7 @@ async function getEventAuthors(events) {
             authors
         }
     }))
+
     return Object.fromEntries(authorEvents.map(event => [event.pubkey, JSON.parse(event.content)]));
 }
 
@@ -311,7 +314,7 @@ function nestEvents(rootId, flatEvents, authors) {
         }
     }
 
-    return events[rootId].map(event => event.comment) ?? [];
+    return events[rootId]?.map(event => event.comment) ?? [];
 }
 
 export const displayName = user => user.display_name || user.displayName || user.name || user.username || user.nip05
