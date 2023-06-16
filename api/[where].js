@@ -7,7 +7,7 @@ export default async function (request, response) {
     const posts = await getPosts(limit,
         {
             'until': after || undefined
-        })
+        }, "Frontpage")
 
     response.send(
         posts

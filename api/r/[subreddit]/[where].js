@@ -8,7 +8,8 @@ export default async function (request, response) {
         {
             '#t': [request.query.subreddit],
             'until': after || undefined
-        }
+        },
+        request.query.subreddit
     )
 
     response.send(

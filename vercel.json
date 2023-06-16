@@ -1,7 +1,10 @@
 {
   "rewrites": [{
-    "source": "/u/:path*.json:else*",
-    "destination": "/api/user/:path*:else*"
+    "source": "/r/:subreddit/comments/:path*",
+    "destination": "/comments/:path*?subreddit=:subreddit"
+  }, {
+    "source": "/u/:path*",
+    "destination": "/user/:path*"
   }, {
     "source": "/:path*.json:else*",
     "destination": "/api/:path*:else*"

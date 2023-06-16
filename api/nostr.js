@@ -119,7 +119,7 @@ async function getEventAuthors(events) {
     return Object.fromEntries(authorEvents.map(event => [event.pubkey, JSON.parse(event.content)]));
 }
 
-export async function getPosts(limit, filter = {}) {
+export async function getPosts(limit, filter = {}, subreddit) {
     filter.filterFunc = isNotReply
     const events = await getEvents({limit, filter});
     const authors = await getEventAuthors(events);
@@ -131,7 +131,7 @@ export async function getPosts(limit, filter = {}) {
             dist: events.length,
             modhash: "",
             geo_filter: null,
-            children: events.map(event => convertEventToPost(event, authors)),
+            children: events.map(event => convertEventToPost(event, authors, subreddit)),
             before: null
         }
     }
@@ -152,11 +152,11 @@ function deduplicateEventsByLatestVersion(events) {
     return Object.values(deduplicated)
 }
 
-export async function getNestedComments(ids, limit, filter = {}) {
+export async function getNestedComments(ids, limit, filter = {}, subreddit) {
     const post = await getPosts(1,
         {
             ids: [ids.postId]
-        }
+        }, subreddit
     )
 
     if (ids.commentId) {
@@ -200,7 +200,7 @@ export async function getNestedComments(ids, limit, filter = {}) {
             dist: events.length,
             modhash: "",
             geo_filter: null,
-            children: nestEvents(ids.postId, events, authors),
+            children: nestEvents(ids.postId, events, authors, subreddit),
             before: null
         }
     }]
@@ -234,7 +234,7 @@ export async function getFlatComments(limit, filter = {}) {
     }
 }
 
-export async function getPostsAndComments(limit, filter = {}) {
+export async function getPostsAndComments(limit, filter = {}, subreddit) {
     const events = await getEvents({
         limit,
         filter: {
@@ -256,7 +256,7 @@ export async function getPostsAndComments(limit, filter = {}) {
                     const postId = getReplyIds(event).rootId
                     return convertEventToComment(postId, event, authors)
                 } else {
-                    return convertEventToPost(event, authors)
+                    return convertEventToPost(event, authors, subreddit)
                 }
             }),
             before: null
@@ -292,7 +292,7 @@ function getReplyIds(event) {
     return ids;
 }
 
-function nestEvents(rootId, flatEvents, authors) {
+function nestEvents(rootId, flatEvents, authors, subreddit) {
     const events = {};
 
     for (const event of flatEvents) {
@@ -301,7 +301,7 @@ function nestEvents(rootId, flatEvents, authors) {
 
         const parentId = replyIds.replyId ?? replyIds.rootId
         events[parentId] ??= [];
-        events[parentId].push({event, comment:  convertEventToComment(replyIds.rootId, event, authors)})
+        events[parentId].push({event, comment:  convertEventToComment(replyIds.rootId, event, authors, subreddit)})
     }
 
     for (const eventId in events) {
@@ -335,7 +335,7 @@ export const isReply = event => event.tags
     .filter(tag => tag[0] === "e")
     .some(tag => tag[3] !== "mention")
 
-function convertEventToPost(event, authors) {
+function convertEventToPost(event, authors, subreddit = "") {
     const convertedData = {
         kind: "t3",
         data: {
@@ -450,6 +450,7 @@ function convertEventToPost(event, authors) {
 
     // convertedData.data.title = "----------------------------------------------------"
     convertedData.data.selftext = event.content;
+    convertedData.data.subreddit = subreddit
     convertedData.data.author = author(authors[event.pubkey], event.pubkey)
     convertedData.data.author_fullname = `t2_${event.pubkey}`
     // convertedData.data.name = authors[event.pubkey].display_name
@@ -460,7 +461,7 @@ function convertEventToPost(event, authors) {
     return convertedData;
 }
 
-function convertEventToComment(postId, event, authors) {
+function convertEventToComment(postId, event, authors, subreddit = "") {
     const convertedData = {
         kind: "t1",
         data: {
@@ -543,6 +544,7 @@ function convertEventToComment(postId, event, authors) {
         }
     }
 
+    convertedData.data.subreddit = subreddit
     convertedData.data.author = author(authors[event.pubkey], event.pubkey);
     convertedData.data.id = event.id;
     convertedData.data.author_fullname = `t2_${event.pubkey}`
