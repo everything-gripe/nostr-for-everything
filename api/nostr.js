@@ -253,14 +253,14 @@ export async function getPostsAndComments(limit, filter = {}, subreddit) {
             dist: events.length,
             modhash: "",
             geo_filter: null,
-            children: events.map(async event => {
+            children: await Promise.all(events.map(async event => {
                 if (isReply(event)) {
                     const postId = getReplyIds(event).rootId
                     return convertEventToComment(postId, event, authors)
                 } else {
                     return await convertEventToPost(event, authors, subreddit)
                 }
-            }),
+            })),
             before: null
         }
     }
