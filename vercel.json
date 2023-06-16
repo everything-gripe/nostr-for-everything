@@ -6,7 +6,10 @@
     "source": "/u/:path*",
     "destination": "/user/:path*"
   }, {
-    "source": "/:path*.json:else*",
-    "destination": "/api/:path*:else*"
+    "source": "/:path*.json",
+    "destination": "/:path*"
+  }, {
+    "source": "/:path*",
+    "destination": "/api/:path*"
   }]
 }

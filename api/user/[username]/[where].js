@@ -6,7 +6,7 @@ export default async function (request, response) {
     const after = Number(request.query.after ?? 0)
 
     let getPostsFunc;
-    switch (request.query.where.toLowerCase()) {
+    switch (request.query.where?.toLowerCase() ?? '') {
         case 'comments':
             getPostsFunc = getFlatComments
             break
@@ -22,7 +22,7 @@ export default async function (request, response) {
         {
             authors: [pubkey],
             'until': after || undefined
-        }
+        }, 'All'
     )
 
     response.send(

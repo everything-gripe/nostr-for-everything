@@ -13,6 +13,7 @@
   "dependencies": {
     "node-fetch": "^2.6.11",
     "nostr-tools": "^1.12.0",
+    "open-graph-scraper": "^6.1.0",
     "websocket-polyfill": "^0.0.3"
   }
 }

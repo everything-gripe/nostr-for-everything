@@ -1,4 +1,5 @@
 ﻿import 'websocket-polyfill'
+import ogs from 'open-graph-scraper'
 import {nip05, nip19, SimplePool} from "nostr-tools";
 
 async function getEvents({limit, filter = {}}) {
@@ -9,17 +10,17 @@ async function getEvents({limit, filter = {}}) {
         // "wss://nostr-pub.wellorder.net",
         // "wss://nostr.mom",
         // "wss://no.str.cr",
-        "wss://nostr.wine",
-        "wss://e.nos.lol",
-        "wss://relay.nostrdocs.com",
-        "wss://nostr-pub1.southflorida.ninja",
-        "wss://relay.lacosanostr.com",
-        "wss://relay.727whiskey.com",
-        "wss://nostr.topeth.info",
-        "wss://nostr.bongbong.com",
-        "wss://nostr.bitcoiner.social",
-        "wss://nostr.w3ierd.tech",
-        "wss://nostr-relay.derekross.me",
+        // "wss://nostr.wine",
+        // "wss://e.nos.lol",
+        // "wss://relay.nostrdocs.com",
+        // "wss://nostr-pub1.southflorida.ninja",
+        // "wss://relay.lacosanostr.com",
+        // "wss://relay.727whiskey.com",
+        // "wss://nostr.topeth.info",
+        // "wss://nostr.bongbong.com",
+        // "wss://nostr.bitcoiner.social",
+        // "wss://nostr.w3ierd.tech",
+        // "wss://nostr-relay.derekross.me",
         // "wss://relay.nostr.bg",
         // "wss://nostr.bitcoiner.social",
         // "wss://nos.lol",
@@ -29,7 +30,8 @@ async function getEvents({limit, filter = {}}) {
         // "wss://relay.nostr.com.au",
         // "wss://puravida.nostr.land",
         // "wss://relay.nostrich.de",
-        // "wss://relay.orangepill.dev",
+        "wss://relay.orangepill.dev",
+        "wss://nostr.orangepill.dev",
         // "wss://relay.plebstr.com",
         // "wss://rsslay.nostr.moe",
         // "wss://eden.nostr.land",
@@ -131,7 +133,7 @@ export async function getPosts(limit, filter = {}, subreddit) {
             dist: events.length,
             modhash: "",
             geo_filter: null,
-            children: events.map(event => convertEventToPost(event, authors, subreddit)),
+            children: await Promise.all(events.map(async event => await convertEventToPost(event, authors, subreddit))),
             before: null
         }
     }
@@ -207,7 +209,7 @@ export async function getNestedComments(ids, limit, filter = {}, subreddit) {
 }
 
 
-export async function getFlatComments(limit, filter = {}) {
+export async function getFlatComments(limit, filter = {}, subreddit) {
     const events = await getEvents({
         limit,
         filter: {
@@ -227,7 +229,7 @@ export async function getFlatComments(limit, filter = {}) {
             geo_filter: null,
             children: events.map(event => {
                 const postId = getReplyIds(event).rootId
-                return convertEventToComment(postId, event, authors)
+                return convertEventToComment(postId, event, authors, subreddit)
             }),
             before: null
         }
@@ -251,12 +253,12 @@ export async function getPostsAndComments(limit, filter = {}, subreddit) {
             dist: events.length,
             modhash: "",
             geo_filter: null,
-            children: events.map(event => {
+            children: events.map(async event => {
                 if (isReply(event)) {
                     const postId = getReplyIds(event).rootId
                     return convertEventToComment(postId, event, authors)
                 } else {
-                    return convertEventToPost(event, authors, subreddit)
+                    return await convertEventToPost(event, authors, subreddit)
                 }
             }),
             before: null
@@ -335,7 +337,7 @@ export const isReply = event => event.tags
     .filter(tag => tag[0] === "e")
     .some(tag => tag[3] !== "mention")
 
-function convertEventToPost(event, authors, subreddit = "") {
+async function convertEventToPost(event, authors, subreddit = "") {
     const convertedData = {
         kind: "t3",
         data: {
@@ -387,7 +389,7 @@ function convertEventToPost(event, authors, subreddit = "") {
             author_flair_richtext: [],
             gildings: {},
             content_categories: null,
-            is_self: true,
+            is_self: false,
             mod_note: null,
             created: 0,
             link_flair_type: "text",
@@ -449,7 +451,51 @@ function convertEventToPost(event, authors, subreddit = "") {
     };
 
     // convertedData.data.title = "----------------------------------------------------"
-    convertedData.data.selftext = event.content;
+    const urlRegex = /^(?:\w+:\/\/)?((?:[\w-]+\.)+[a-z]{2,})(?::\d{1,5})?(?:\/[^\s$?#]*)?(?:\?[^\\s#]*)?(?:#[^\s]*)?$/
+    const match = event.content.match(urlRegex);
+
+    if (match) {
+        convertedData.data.url = event.content
+        convertedData.data.domain = match[1]
+
+        try {
+            const { result: metadata } = await ogs({url: event.content})
+            convertedData.data.title = metadata.ogTitle
+
+
+            if (metadata.ogImage[0]) {
+                const preview = {
+                    images: metadata.ogImage.map(image =>
+                        ({
+                            source: {
+                                url: image.url,
+                                width: image.height || 1000,
+                                height: image.width || 1000
+                            },
+                            resolutions: [
+                                {
+                                    url: image.url,
+                                    width: image.height || 1000,
+                                    height: image.width || 1000
+                                }
+                            ],
+                            variants: {},
+                            id: image.url
+                        })
+                    ),
+                    enabled: false
+                }
+
+                convertedData.data.thumbnail = metadata.ogImage[0].url
+                convertedData.data.preview = preview
+            }
+        } catch (e) {}
+    } else {
+        convertedData.data.selftext = event.content
+        convertedData.data.is_self = true
+
+    }
+
     convertedData.data.subreddit = subreddit
     convertedData.data.author = author(authors[event.pubkey], event.pubkey)
     convertedData.data.author_fullname = `t2_${event.pubkey}`
