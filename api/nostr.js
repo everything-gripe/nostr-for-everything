@@ -2,7 +2,7 @@
 import ogs from 'open-graph-scraper'
 import {nip05, nip19, SimplePool} from "nostr-tools";
 
-const tagRegex = /(#\[(\w+)])/gm
+const tagRegex = /(#\[(\d+)])/gm
 const hashtagRegex = /(#(\w+))/gm
 const nostrRegex = /(nostr:(\w+))/gm
 
@@ -347,14 +347,14 @@ export const author = (user, pubkey)=> user ? displayName(user) ? `${displayName
 export const subject = event => event.tags.find(tag => tag[0] === 'subject')?.[1]
 export const isNotReply = event => !isReply(event)
 //TODO: Consider if there is no marker
+export const processContent = async event => (await event.content
+    .replaceAllAsync(tagRegex, async (substring, ...args) => await tagToUrl(event, substring, ...args)))
+    .replaceAll(hashtagRegex, '[$1](/r/$2)')
+    .replaceAllAsync(nostrRegex, nip21ToUrl)
+
 export const isReply = event => event.tags
     .filter(tag => tag[0] === "e")
     .some(tag => tag[3] !== "mention")
-
-export const processContent = async event => await event.content
-    // .replaceAll(tagRegex, )
-    .replaceAll(hashtagRegex, '[$1](/r/$2)')
-    .replaceAllAsync(nostrRegex, nip21ToUrl)
 
 async function convertEventToPost(event, authors, subreddit = "") {
     const convertedData = {
@@ -527,9 +527,7 @@ async function convertEventToPost(event, authors, subreddit = "") {
 }
 
 
-async function nip21ToUrl(substring, ...args) {
-    const decoded = nip19.decode(args[1])
-
+async function keyToUrl(decoded) {
     switch (decoded.type) {
         case 'npub':
             // case 'nsec':
@@ -537,9 +535,24 @@ async function nip21ToUrl(substring, ...args) {
             return `[${user.data.subreddit.display_name}](${user.data.subreddit.url})`
         case 'note':
             return `/comments/${decoded.data}`
-        default:
-            return substring
     }
+}
+
+async function nip21ToUrl(substring, ...args) {
+    const decoded = nip19.decode(args[1])
+    return (await keyToUrl(decoded, substring)) || substring;
+}
+
+function tagToUrl(event, substring, ...args) {
+    const tag = event.tags[Number(args[1])]
+    switch (tag[0]) {
+        case 'p':
+            return keyToUrl({type: 'npub', data: tag[1]})
+        case 'e':
+            return keyToUrl({type: 'note', data: tag[1]} )
+    }
+
+    return substring
 }
 
 async function convertEventToComment(postId, event, authors, subreddit = "") {
