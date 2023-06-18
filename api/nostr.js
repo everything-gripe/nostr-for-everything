@@ -2,6 +2,10 @@
 import ogs from 'open-graph-scraper'
 import {nip05, nip19, SimplePool} from "nostr-tools";
 
+const tagRegex = /(#\[(\w+)])/gm
+const hashtagRegex = /(#(\w+))/gm
+const nostrRegex = /(nostr:(\w+))/gm
+
 async function getEvents({limit, filter = {}}) {
     const pool = new SimplePool()
 
@@ -69,13 +73,19 @@ async function getEvents({limit, filter = {}}) {
 }
 
 export async function getPubkey(user) {
-    const displayNameRegex = /npub\w+/
-    const match = user.match(displayNameRegex)
-    if (match) {
-        user = nip19.decode(match[0]).data
-    } else if (nip05.NIP05_REGEX.test(user)) {
+    const parenthesesRegex = /\((.*?)\)$/
+    const parenthesesMatch = user.match(parenthesesRegex)
+    if (parenthesesMatch) {
+        user = parenthesesMatch[1]
+    }
+
+    const userNpubRegex = /(npub\w+)/
+    const npubMatch = user.match(userNpubRegex)
+    if (npubMatch) {
+        user = nip19.decode(npubMatch[1]).data
+    } else {
         nip05.useFetchImplementation(require('node-fetch'))
-        user = (await nip05.queryProfile(user)).pubkey
+        user = (await nip05.queryProfile(user))?.pubkey
     }
 
     return user
@@ -88,18 +98,19 @@ export async function getUser(pubkey) {
             kinds: [0],
             authors: [pubkey]
         }
-    }))[0].content)
+    }))[0]?.content || '{}')
 
     return {
         kind: "t2",
         data: {
             icon_img: user.picture,
-            name: displayName(user) || pubkey,
+            name: displayNameOrUsername(user, pubkey),
             id: pubkey,
             subreddit: {
                 public_description: user.about,
-                display_name: displayName(user) || pubkey,
-                display_name_prefixed: displayName(user) || pubkey,
+                display_name: displayNameOrUsername(user, pubkey),
+                display_name_prefixed: `${displayNameOrUsername(user, pubkey)}`,
+                url: `/u/${username(user, pubkey)}`,
                 subreddit_type: "user",
                 icon_img: user.picture,
             }
@@ -202,7 +213,7 @@ export async function getNestedComments(ids, limit, filter = {}, subreddit) {
             dist: events.length,
             modhash: "",
             geo_filter: null,
-            children: nestEvents(ids.postId, events, authors, subreddit),
+            children: await nestEvents(ids.postId, events, authors, subreddit),
             before: null
         }
     }]
@@ -227,10 +238,10 @@ export async function getFlatComments(limit, filter = {}, subreddit) {
             dist: events.length,
             modhash: "",
             geo_filter: null,
-            children: events.map(event => {
+            children: await Promise.all(events.map(async event => {
                 const postId = getReplyIds(event).rootId
-                return convertEventToComment(postId, event, authors, subreddit)
-            }),
+                return await convertEventToComment(postId, event, authors, subreddit)
+            })),
             before: null
         }
     }
@@ -256,7 +267,7 @@ export async function getPostsAndComments(limit, filter = {}, subreddit) {
             children: await Promise.all(events.map(async event => {
                 if (isReply(event)) {
                     const postId = getReplyIds(event).rootId
-                    return convertEventToComment(postId, event, authors)
+                    return await convertEventToComment(postId, event, authors)
                 } else {
                     return await convertEventToPost(event, authors, subreddit)
                 }
@@ -294,7 +305,7 @@ function getReplyIds(event) {
     return ids;
 }
 
-function nestEvents(rootId, flatEvents, authors, subreddit) {
+async function nestEvents(rootId, flatEvents, authors, subreddit) {
     const events = {};
 
     for (const event of flatEvents) {
@@ -303,7 +314,7 @@ function nestEvents(rootId, flatEvents, authors, subreddit) {
 
         const parentId = replyIds.replyId ?? replyIds.rootId
         events[parentId] ??= [];
-        events[parentId].push({event, comment:  convertEventToComment(replyIds.rootId, event, authors, subreddit)})
+        events[parentId].push({event, comment: await convertEventToComment(replyIds.rootId, event, authors, subreddit)})
     }
 
     for (const eventId in events) {
@@ -329,13 +340,21 @@ function nestEvents(rootId, flatEvents, authors, subreddit) {
     return events[rootId]?.map(event => event.comment) ?? [];
 }
 
-export const displayName = user => user.display_name || user.displayName || user.name || user.username || user.nip05
-export const author = (user, pubkey) => user ? user.nip05 || `${displayName(user)} (${nip19.npubEncode(pubkey)})` || pubkey : pubkey;
+export const displayNameOrUsername = (user, pubkey) => displayName(user) || username(user, pubkey)
+export const displayName = (user) => user.display_name || user.displayName || user.name || user.username
+export const username = (user, pubkey) => user.nip05 || nip19.npubEncode(pubkey)
+export const author = (user, pubkey)=> user ? displayName(user) ? `${displayName(user)} (${username(user, pubkey)})` : username(user, pubkey) : nip19.npubEncode(pubkey);
+export const subject = event => event.tags.find(tag => tag[0] === 'subject')?.[1]
 export const isNotReply = event => !isReply(event)
 //TODO: Consider if there is no marker
 export const isReply = event => event.tags
     .filter(tag => tag[0] === "e")
     .some(tag => tag[3] !== "mention")
+
+export const processContent = async event => await event.content
+    // .replaceAll(tagRegex, )
+    .replaceAll(hashtagRegex, '[$1](/r/$2)')
+    .replaceAllAsync(nostrRegex, nip21ToUrl)
 
 async function convertEventToPost(event, authors, subreddit = "") {
     const convertedData = {
@@ -450,6 +469,8 @@ async function convertEventToPost(event, authors, subreddit = "") {
         }
     };
 
+    convertedData.data.title = subject(event)
+
     // convertedData.data.title = "----------------------------------------------------"
     const urlRegex = /^(?:\w+:\/\/)?((?:[\w-]+\.)+[a-z]{2,})(?::\d{1,5})?(?:\/[^\s$?#]*)?(?:\?[^\\s#]*)?(?:#[^\s]*)?$/
     const match = event.content.match(urlRegex);
@@ -460,8 +481,7 @@ async function convertEventToPost(event, authors, subreddit = "") {
 
         try {
             const { result: metadata } = await ogs({url: event.content})
-            convertedData.data.title = metadata.ogTitle
-
+            convertedData.data.title ||= metadata.ogTitle
 
             if (metadata.ogImage[0]) {
                 const preview = {
@@ -491,9 +511,8 @@ async function convertEventToPost(event, authors, subreddit = "") {
             }
         } catch (e) {}
     } else {
-        convertedData.data.selftext = event.content
+        convertedData.data.selftext = await processContent(event)
         convertedData.data.is_self = true
-
     }
 
     convertedData.data.subreddit = subreddit
@@ -507,7 +526,23 @@ async function convertEventToPost(event, authors, subreddit = "") {
     return convertedData;
 }
 
-function convertEventToComment(postId, event, authors, subreddit = "") {
+
+async function nip21ToUrl(substring, ...args) {
+    const decoded = nip19.decode(args[1])
+
+    switch (decoded.type) {
+        case 'npub':
+            // case 'nsec':
+            const user = await getUser(decoded.data)
+            return `[${user.data.subreddit.display_name}](${user.data.subreddit.url})`
+        case 'note':
+            return `/comments/${decoded.data}`
+        default:
+            return substring
+    }
+}
+
+async function convertEventToComment(postId, event, authors, subreddit = "") {
     const convertedData = {
         kind: "t1",
         data: {
@@ -598,10 +633,21 @@ function convertEventToComment(postId, event, authors, subreddit = "") {
     // convertedData.data.link_id = `t3_7efd3372c0cbbd5b5f45cdedc14d58f28b8873e7673c642aeb7796177757e52e`
     // convertedData.data.permalink = `/r/anything/comments/${postId}/something_here/${event.id}`
     // convertedData.data.link_permalink = `https://www.reddit.com/r/anything/comments/${postId}/something_here/`
-    convertedData.data.body = event.content;
-    convertedData.data.body_html = event.content;
+    convertedData.data.body = await processContent(event);
+    convertedData.data.body_html = await processContent(event);
     convertedData.data.created = event.created_at;
     convertedData.data.created_utc = event.created_at;
 
     return convertedData;
+}
+
+
+String.prototype.replaceAllAsync = async function(regex, asyncFn) {
+    const promises = [];
+    this.replaceAll(regex, (match, ...args) => {
+        const promise = asyncFn(match, ...args);
+        promises.push(promise);
+    });
+    const data = await Promise.all(promises);
+    return this.replaceAll(regex, () => data.shift());
 }

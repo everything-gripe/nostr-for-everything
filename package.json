@@ -2,7 +2,6 @@
   "name": "reddit-to-nostr",
   "version": "0.0.1",
   "description": "Wrap Nostr in a Reddit styled api",
-  "main": "index.js",
   "scripts": {
     "start:dev": "vercel dev",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -14,7 +13,6 @@
     "node-fetch": "^2.6.11",
     "nostr-tools": "^1.12.0",
     "open-graph-scraper": "^6.1.0",
-    "websocket-polyfill": "^0.0.3",
-    "zwsp-steg": "^1.0.1"
+    "websocket-polyfill": "^0.0.3"
   }
 }
