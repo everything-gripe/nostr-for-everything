@@ -9,6 +9,9 @@ const tagRegex = /(#\[(\d+)])/gm
 const hashtagRegex = /(#(\w+))/gm
 const nostrRegex = /(nostr:(\w+))/gm
 
+const imageBaseUrl = process.env.VERCEL_URL ? `${process.env.VERCEL_URL}/images` : 'preview.redd.it';
+
+
 async function getEvents({limit, filter = {}}) {
     const pool = new SimplePool()
 
@@ -373,17 +376,17 @@ export const processContent = async event => {
                     p: [{
                         y: imageSize.height,
                         x: imageSize.width,
-                        u: `https://preview.redd.it/${imageUrlEncoded}?width=${imageSize.width}&amp;format=pjpg&amp;auto=webp&amp;v=enabled&amp;s=9cc0b6d6a1681042ab2726257ecaa105c621212e`
+                        u: `https://${imageBaseUrl}/${imageUrlEncoded}?width=${imageSize.width}&amp;format=pjpg&amp;auto=webp&amp;v=enabled&amp;s=9cc0b6d6a1681042ab2726257ecaa105c621212e`
                     }],
                     s: {
                         y: imageSize.height,
                         x: imageSize.width,
-                        u: `https://preview.redd.it/${imageUrlEncoded}?width=${imageSize.width}&amp;format=pjpg&amp;auto=webp&amp;v=enabled&amp;s=9cc0b6d6a1681042ab2726257ecaa105c621212e`,
-                        [imageSize.type]: `https://preview.redd.it/${imageUrlEncoded}?width=${imageSize.width}&amp;format=pjpg&amp;auto=webp&amp;v=enabled&amp;s=9cc0b6d6a1681042ab2726257ecaa105c621212e`,
+                        u: `https://${imageBaseUrl}/${imageUrlEncoded}?width=${imageSize.width}&amp;format=pjpg&amp;auto=webp&amp;v=enabled&amp;s=9cc0b6d6a1681042ab2726257ecaa105c621212e`,
+                        [imageSize.type]: `https://${imageBaseUrl}/${imageUrlEncoded}?width=${imageSize.width}&amp;format=pjpg&amp;auto=webp&amp;v=enabled&amp;s=9cc0b6d6a1681042ab2726257ecaa105c621212e`,
                     },
                 }
 
-                return `https://preview.redd.it/${imageUrlEncoded}?width=${imageSize.width}&amp;format=pjpg&amp;auto=webp&amp;v=enabled&amp;s=9cc0b6d6a1681042ab2726257ecaa105c621212e`
+                return `https://${imageBaseUrl}/${imageUrlEncoded}?width=${imageSize.width}&amp;format=pjpg&amp;auto=webp&amp;v=enabled&amp;s=9cc0b6d6a1681042ab2726257ecaa105c621212e`
             } catch (e) {
                 return substring
             }
