@@ -1,7 +1,10 @@
 ﻿import 'websocket-polyfill'
 import ogs from 'open-graph-scraper'
+import probeImageSize from 'probe-image-size'
 import {nip05, nip19, SimplePool} from "nostr-tools";
 
+const urlRegex = /https?:\/\/(?:www\.)?([-a-zA-Z0-9@:%._+~#=]{1,256}\.[a-zA-Z0-9()]{1,6})\b[-a-zA-Z0-9()@:%_+.~#?&\/=]*/gm
+const onlyUrlRegex = new RegExp(`^${urlRegex.source}$`)
 const tagRegex = /(#\[(\d+)])/gm
 const hashtagRegex = /(#(\w+))/gm
 const nostrRegex = /(nostr:(\w+))/gm
@@ -347,10 +350,47 @@ export const author = (user, pubkey)=> user ? displayName(user) ? `${displayName
 export const subject = event => event.tags.find(tag => tag[0] === 'subject')?.[1]
 export const isNotReply = event => !isReply(event)
 //TODO: Consider if there is no marker
-export const processContent = async event => (await event.content
-    .replaceAllAsync(tagRegex, async (substring, ...args) => await tagToUrl(event, substring, ...args)))
-    .replaceAll(hashtagRegex, '[$1](/r/$2)')
-    .replaceAllAsync(nostrRegex, nip21ToUrl)
+export const processContent = async event => {
+    const mediaMetadata = {}
+
+    const content = await(await(await(await event.content
+        .replaceAll(hashtagRegex, '[$1](/r/$2)')
+        .replaceAllAsync(tagRegex, async (substring, ...args) => await tagToUrl(event, substring, ...args)))
+        .replaceAllAsync(nostrRegex, nip21ToUrl))
+        .replaceAllAsync(urlRegex, async (substring, ...args) => {
+            const imageUrl = substring
+
+            try {
+                const imageSize = await probeImageSize(imageUrl)
+                let imageUrlEncoded = encodeURIComponent(imageUrl).replace(/\.(?![^.]+$)/g, '%2E')
+                const imageId = imageUrlEncoded.substring(0, imageUrlEncoded.length -(imageSize.type.length + 1))
+
+                mediaMetadata[imageId] = {
+                    id: imageId,
+                    status: "valid",
+                    e: "Image",
+                    m: `image/${imageSize.type}`,
+                    p: [{
+                        y: imageSize.height,
+                        x: imageSize.width,
+                        u: `https://preview.redd.it/${imageUrlEncoded}?width=${imageSize.width}&amp;format=pjpg&amp;auto=webp&amp;v=enabled&amp;s=9cc0b6d6a1681042ab2726257ecaa105c621212e`
+                    }],
+                    s: {
+                        y: imageSize.height,
+                        x: imageSize.width,
+                        u: `https://preview.redd.it/${imageUrlEncoded}?width=${imageSize.width}&amp;format=pjpg&amp;auto=webp&amp;v=enabled&amp;s=9cc0b6d6a1681042ab2726257ecaa105c621212e`,
+                        [imageSize.type]: `https://preview.redd.it/${imageUrlEncoded}?width=${imageSize.width}&amp;format=pjpg&amp;auto=webp&amp;v=enabled&amp;s=9cc0b6d6a1681042ab2726257ecaa105c621212e`,
+                    },
+                }
+
+                return `https://preview.redd.it/${imageUrlEncoded}?width=${imageSize.width}&amp;format=pjpg&amp;auto=webp&amp;v=enabled&amp;s=9cc0b6d6a1681042ab2726257ecaa105c621212e`
+            } catch (e) {
+                return substring
+            }
+        }))
+
+    return {content, mediaMetadata}
+}
 
 export const isReply = event => event.tags
     .filter(tag => tag[0] === "e")
@@ -387,6 +427,7 @@ async function convertEventToPost(event, authors, subreddit = "") {
             ups: 0,
             total_awards_received: 0,
             media_embed: {},
+            media_metadata: {},
             thumbnail_width: null,
             author_flair_template_id: null,
             is_original_content: false,
@@ -472,11 +513,11 @@ async function convertEventToPost(event, authors, subreddit = "") {
     convertedData.data.title = subject(event)
 
     // convertedData.data.title = "----------------------------------------------------"
-    const urlRegex = /^(?:\w+:\/\/)?((?:[\w-]+\.)+[a-z]{2,})(?::\d{1,5})?(?:\/[^\s$?#]*)?(?:\?[^\\s#]*)?(?:#[^\s]*)?$/
-    const match = event.content.match(urlRegex);
+    const contentTrimmed = event.content.trim();
+    const match = contentTrimmed.match(onlyUrlRegex);
 
     if (match) {
-        convertedData.data.url = event.content
+        convertedData.data.url = contentTrimmed
         convertedData.data.domain = match[1]
 
         try {
@@ -511,7 +552,10 @@ async function convertEventToPost(event, authors, subreddit = "") {
             }
         } catch (e) {}
     } else {
-        convertedData.data.selftext = await processContent(event)
+        const processed = await processContent(event)
+
+        convertedData.data.selftext = processed.content
+        convertedData.data.media_metadata = processed.mediaMetadata
         convertedData.data.is_self = true
     }
 
@@ -595,6 +639,7 @@ async function convertEventToComment(postId, event, authors, subreddit = "") {
             removal_reason: null,
             approved_by: null,
             controversiality: 0,
+            media_metadata: {},
             body: "",
             edited: false,
             top_awarded_type: null,
@@ -638,6 +683,8 @@ async function convertEventToComment(postId, event, authors, subreddit = "") {
         }
     }
 
+    const processed = await processContent(event)
+
     convertedData.data.subreddit = subreddit
     convertedData.data.author = author(authors[event.pubkey], event.pubkey);
     convertedData.data.id = event.id;
@@ -646,8 +693,9 @@ async function convertEventToComment(postId, event, authors, subreddit = "") {
     // convertedData.data.link_id = `t3_7efd3372c0cbbd5b5f45cdedc14d58f28b8873e7673c642aeb7796177757e52e`
     // convertedData.data.permalink = `/r/anything/comments/${postId}/something_here/${event.id}`
     // convertedData.data.link_permalink = `https://www.reddit.com/r/anything/comments/${postId}/something_here/`
-    convertedData.data.body = await processContent(event);
-    convertedData.data.body_html = await processContent(event);
+    convertedData.data.body = processed.content;
+    convertedData.data.body_html = processed.content;
+    convertedData.data.media_metadata = processed.mediaMetadata;
     convertedData.data.created = event.created_at;
     convertedData.data.created_utc = event.created_at;
 
