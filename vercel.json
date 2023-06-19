@@ -1,5 +1,12 @@
 {
   "rewrites": [{
+    "source": "/:path",
+    "destination": "/images/:path",
+    "has": [{
+      "type": "host",
+      "value": "reddit-to-nostr-images.vercel.app"
+    }]
+  }, {
     "source": "/r/:subreddit/comments/:path*",
     "destination": "/comments/:path*?subreddit=:subreddit"
   }, {

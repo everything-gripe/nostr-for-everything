@@ -9,7 +9,7 @@ const tagRegex = /(#\[(\d+)])/gm
 const hashtagRegex = /(#(\w+))/gm
 const nostrRegex = /(nostr:(\w+))/gm
 
-const imageBaseUrl = process.env.VERCEL_ENV ? `reddit-to-nostr.vercel.app/images` : 'preview.redd.it';
+const imageBaseUrl = process.env.VERCEL_ENV ? `reddit-to-nostr-images.vercel.app` : 'preview.redd.it';
 
 
 async function getEvents({limit, filter = {}}) {
