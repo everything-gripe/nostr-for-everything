@@ -1,7 +1,7 @@
 {
-  "name": "reddit-to-nostr",
+  "name": "nostr-for-everything",
   "version": "0.0.1",
-  "description": "Wrap Nostr in a Reddit styled api",
+  "description": "Connect with the Nostr service seamlessly through the Everything middleware. Simplify integration and streamline API access with Nostr for Everything.",
   "scripts": {
     "start:dev": "vercel dev",
     "test": "echo \"Error: no test specified\" && exit 1"
