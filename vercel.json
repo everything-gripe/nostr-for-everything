@@ -8,7 +8,7 @@
     }]
   }, {
     "source": "/r/:subreddit/comments/:path*",
-    "destination": "http://localhost:3000/comments/:path*?subreddit=:subreddit"
+    "destination": "/comments/:path*?subreddit=:subreddit"
   }, {
     "source": "/u/:path*",
     "destination": "/user/:path*"
